@@ -1,4 +1,14 @@
-# Poketracking
+# Pokematching
+
+## Setup
+
+Create the project virtualenv using Python 3.11.9 via pyenv (avoids `pkgutil.find_loader` error in Python 3.14):
+
+```bash
+~/.pyenv/versions/3.11.9/bin/python -m venv ~/.venvs/pokematching-venv
+source ~/.venvs/pokematching-venv/bin/activate
+pip install -r requirements.txt
+```
 
 ## Label Studio
 
