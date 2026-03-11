@@ -1,0 +1,10 @@
+.DS_Store
+
+card_images/
+extracted/
+frames/
+label-studio-export/
+
+card_descriptors.npz
+match_results.json
+recording.mov
