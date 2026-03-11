@@ -7,9 +7,9 @@ import re
 
 CLASSES = {0: "attached-energy", 1: "attached-item", 2: "card", 3: "multicard"}
 
-labels_dir = Path("label-studio-export/labels")
-frames_dir = Path("frames")
-output_dir = Path("extracted")
+labels_dir = Path("label_studio_export/labels")
+frames_dir = Path("label_studio_export/images")
+output_dir = Path("extracted_regions")
 output_dir.mkdir(exist_ok=True)
 
 total = 0
@@ -25,7 +25,7 @@ for label_file in sorted(labels_dir.glob("*.txt")):
         continue
     frame_name = match.group(1)
 
-    image_path = frames_dir / f"{frame_name}.png"
+    image_path = frames_dir / f"{label_file.stem}.png"
     if not image_path.exists():
         print(f"Missing image: {image_path}")
         continue

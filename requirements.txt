@@ -3,3 +3,4 @@ opencv-python
 requests
 tqdm
 numpy
+label-studio

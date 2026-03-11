@@ -1,9 +1,8 @@
 .DS_Store
 
 card_images/
-extracted/
-frames/
-label-studio-export/
+extracted_regions/
+label_studio_export/
 
 card_descriptors.npz
 match_results.json

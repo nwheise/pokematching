@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 CARDS_DIR = Path("pokemon-tcg-data/cards/en")
 SETS_FILE = Path("pokemon-tcg-data/sets/en.json")
-EXTRACTED_DIR = Path("extracted")
+EXTRACTED_DIR = Path("extracted_regions")
 CACHE_DIR = Path("card_images")
 DESC_CACHE = Path("card_descriptors.npz")
 OUTPUT_FILE = Path("match_results.json")
