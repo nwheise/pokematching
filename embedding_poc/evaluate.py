@@ -12,8 +12,13 @@ Run:
 """
 
 import json
+import sys
+import os
 import time
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from extract_regions import mask_overlapping_regions, OVERLAY_CLASSES  # noqa: E402
 
 import numpy as np
 import timm
@@ -121,24 +126,33 @@ def load_frame_crops(frames_dir: Path, labels_dir: Path) -> list[dict]:
             continue
 
         W, H = frame.size
+
+        # Parse all boxes for this frame first so masking can reference overlay regions
+        frame_boxes = []
         for line in label_path.read_text().splitlines():
             parts = line.strip().split()
             if len(parts) != 5:
                 continue
             cls = int(parts[0])
             xc, yc, bw, bh = map(float, parts[1:])
-            x0 = max(0,    int((xc - bw / 2) * W))
-            y0 = max(0,    int((yc - bh / 2) * H))
-            x1 = min(W,    int((xc + bw / 2) * W))
-            y1 = min(H,    int((yc + bh / 2) * H))
+            x0 = max(0, int((xc - bw / 2) * W))
+            y0 = max(0, int((yc - bh / 2) * H))
+            x1 = min(W, int((xc + bw / 2) * W))
+            y1 = min(H, int((yc + bh / 2) * H))
             if x1 <= x0 or y1 <= y0:
                 continue
+            frame_boxes.append((cls, x0, y0, x1, y1))
+
+        for cls, x0, y0, x1, y1 in frame_boxes:
+            crop = frame.crop((x0, y0, x1, y1))
+            if cls not in OVERLAY_CLASSES:
+                mask_overlapping_regions(crop, (x0, y0, x1, y1), frame_boxes)
             results.append({
                 "frame_stem": label_path.stem,
                 "frame_path": img_path,
                 "cls": cls,
                 "box": (x0, y0, x1, y1),
-                "crop": frame.crop((x0, y0, x1, y1)),
+                "crop": crop,
             })
 
     return results
