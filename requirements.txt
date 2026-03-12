@@ -4,3 +4,6 @@ requests
 tqdm
 numpy
 label-studio
+timm
+torch
+torchvision
