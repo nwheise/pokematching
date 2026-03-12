@@ -3,7 +3,7 @@
 card_images/
 extracted_regions/
 label_studio_export/
-embedding_poc/output/
+embedding_poc/output*
 
 match_results.json
 *.npz

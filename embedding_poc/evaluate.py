@@ -32,8 +32,8 @@ CARD_IMAGES_DIR = Path("card_images")
 FRAMES_DIR = Path("label_studio_export/images")
 LABELS_DIR = Path("label_studio_export/labels")
 TCG_CARDS_DIR = Path("pokemon-tcg-data/cards/en")
-OUTPUT_DIR = Path("embedding_poc/output")
-EMBED_CACHE = Path("embedding_poc/ref_embeddings.npz")
+OUTPUT_BASE_DIR = Path("embedding_poc/output")
+EMBED_CACHE_DIR = Path("embedding_poc")
 
 TOP_N = 5
 
@@ -194,21 +194,27 @@ class EmbeddingModel:
 # Index building (with disk cache)
 # ---------------------------------------------------------------------------
 
-def _cache_key(card_paths: list[Path]) -> str:
-    """A fingerprint of the current card image set — sorted stems joined."""
-    return ",".join(p.stem for p in card_paths)
+def _cache_key(card_paths: list[Path], model_name: str) -> str:
+    """A fingerprint of the current card image set + model — sorted stems joined."""
+    return model_name + "|" + ",".join(p.stem for p in card_paths)
+
+
+def _embed_cache_path(model_name: str) -> Path:
+    safe_name = model_name.replace("/", "_").replace(" ", "_")
+    return EMBED_CACHE_DIR / f"ref_embeddings_{safe_name}.npz"
 
 
 def build_index(
     model: EmbeddingModel, card_paths: list[Path], batch_size: int = 64
 ) -> tuple[np.ndarray, list[str]]:
     """Return (embeddings [N,D], card_ids [N]), loading from cache when valid."""
-    current_key = _cache_key(card_paths)
+    cache_path = _embed_cache_path(model.name)
+    current_key = _cache_key(card_paths, model.name)
 
-    if EMBED_CACHE.exists():
-        data = np.load(EMBED_CACHE, allow_pickle=True)
+    if cache_path.exists():
+        data = np.load(cache_path, allow_pickle=True)
         if str(data["cache_key"]) == current_key:
-            print(f"  Loaded reference embeddings from cache ({EMBED_CACHE})")
+            print(f"  Loaded reference embeddings from cache ({cache_path})")
             return data["embeddings"], data["card_ids"].tolist()
         print("  Embedding cache stale — rebuilding...")
     else:
@@ -228,9 +234,9 @@ def build_index(
         all_embeddings.append(model.embed_batch(images))
 
     embeddings = np.vstack(all_embeddings)
-    EMBED_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(EMBED_CACHE, embeddings=embeddings, card_ids=np.array(card_ids), cache_key=current_key)
-    print(f"  Saved reference embeddings to {EMBED_CACHE}")
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(cache_path, embeddings=embeddings, card_ids=np.array(card_ids), cache_key=current_key)
+    print(f"  Saved reference embeddings to {cache_path}")
     return embeddings, card_ids
 
 
@@ -306,8 +312,6 @@ def main() -> None:
         if not d.is_dir():
             raise SystemExit(f"Error: directory not found: {d}")
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
     print("Building card catalog from pokemon-tcg-data...")
     catalog = build_card_catalog()
     print(f"  {len(catalog)} cards loaded")
@@ -326,7 +330,11 @@ def main() -> None:
     print(f"Query crops     : {len(crops)}")
 
     # Load model + build index
+    # model = EmbeddingModel("DINOv2-ViT-S/14", "vit_small_patch14_dinov2.lvd142m")
     model = EmbeddingModel("MobileNetV4", "mobilenetv4_conv_small.e2400_r224_in1k")
+    safe_name = model.name.replace("/", "_").replace(" ", "_")
+    output_dir = OUTPUT_BASE_DIR / safe_name
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     print("\n[Phase 1] Building reference index...")
     ref_embs, card_ids = build_index(model, card_paths)
@@ -357,17 +365,17 @@ def main() -> None:
             valid_mask = class_masks.get(det["cls"])  # None for cls 2/3
             det["top"] = match_crop(emb, ref_embs, card_ids, valid_mask=valid_mask)
 
-        out_path = OUTPUT_DIR / f"{frame_stem}_annotated.png"
+        out_path = output_dir / f"{frame_stem}_annotated.png"
         draw_results(detections[0]["frame_path"], detections, catalog, out_path)
 
     # Timing summary
     print("\n" + "=" * 55)
-    print("  TIMING SUMMARY  (MobileNetV4)")
+    print(f"  TIMING SUMMARY  ({model.name})")
     print("=" * 55)
     print(f"  Median: {np.median(inf_ms):.1f} ms   Mean: {np.mean(inf_ms):.1f} ms")
     print(f"  Total crops matched: {len(crops)}")
     print("=" * 55)
-    print(f"\nAnnotated frames saved to {OUTPUT_DIR}/")
+    print(f"\nAnnotated frames saved to {output_dir}/")
     print("Done.")
 
 
