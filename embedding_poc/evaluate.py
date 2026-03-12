@@ -39,19 +39,41 @@ BOX_WIDTH  = 3
 
 
 # ---------------------------------------------------------------------------
-# Card name lookup from pokemon-tcg-data
+# Card catalog from pokemon-tcg-data
 # ---------------------------------------------------------------------------
 
-def build_name_lookup() -> dict[str, str]:
-    """Return {card_id: card_name} for all cards in pokemon-tcg-data."""
-    lookup = {}
+def build_card_catalog() -> dict[str, dict]:
+    """Return {card_id: {"name": ..., "supertype": ..., "subtypes": [...]}} for all cards."""
+    catalog = {}
     for json_path in TCG_CARDS_DIR.glob("*.json"):
         try:
             for card in json.loads(json_path.read_text()):
-                lookup[card["id"]] = card["name"]
+                catalog[card["id"]] = {
+                    "name": card.get("name", card["id"]),
+                    "supertype": card.get("supertype", ""),
+                    "subtypes": card.get("subtypes", []),
+                }
         except Exception:
             pass
-    return lookup
+    return catalog
+
+
+# ---------------------------------------------------------------------------
+# Class-based filtering
+# ---------------------------------------------------------------------------
+
+CLASS_FILTERS = {
+    0: lambda meta: meta.get("supertype") == "Energy",
+    1: lambda meta: meta.get("supertype") == "Trainer" and "Pokémon Tool" in meta.get("subtypes", []),
+}
+
+
+def build_class_masks(card_ids: list[str], catalog: dict[str, dict]) -> dict[int, np.ndarray]:
+    """Return {class_id: bool mask [N]} for classes with restricted search spaces."""
+    masks = {}
+    for cls, predicate in CLASS_FILTERS.items():
+        masks[cls] = np.array([predicate(catalog.get(cid, {})) for cid in card_ids], dtype=bool)
+    return masks
 
 
 # ---------------------------------------------------------------------------
@@ -203,9 +225,20 @@ def build_index(
 # ---------------------------------------------------------------------------
 
 def match_crop(
-    query_emb: np.ndarray, ref_embeddings: np.ndarray, card_ids: list[str], top_n: int = TOP_N
+    query_emb: np.ndarray,
+    ref_embeddings: np.ndarray,
+    card_ids: list[str],
+    top_n: int = TOP_N,
+    valid_mask: np.ndarray | None = None,
 ) -> list[tuple[str, float]]:
-    """Return top-N (card_id, cosine_similarity)."""
+    """Return top-N (card_id, cosine_similarity), optionally restricted to valid_mask."""
+    if valid_mask is not None and valid_mask.any():
+        idx = np.where(valid_mask)[0]
+        sims_sub = ref_embeddings[idx] @ query_emb
+        k = min(top_n, len(idx))
+        top_local = np.argpartition(sims_sub, -k)[-k:]
+        top_local = top_local[np.argsort(sims_sub[top_local])[::-1]]
+        return [(card_ids[idx[i]], float(sims_sub[i])) for i in top_local]
     sims = ref_embeddings @ query_emb
     top_idx = np.argpartition(sims, -top_n)[-top_n:]
     top_idx = top_idx[np.argsort(sims[top_idx])[::-1]]
@@ -223,7 +256,7 @@ def _load_font(size: int):
         return ImageFont.load_default()
 
 
-def draw_results(frame_path: Path, detections: list[dict], name_lookup: dict[str, str], out_path: Path) -> None:
+def draw_results(frame_path: Path, detections: list[dict], catalog: dict[str, dict], out_path: Path) -> None:
     """Draw bounding boxes + top-1 match labels onto a copy of the frame and save."""
     img = Image.open(frame_path).convert("RGB")
     draw = ImageDraw.Draw(img)
@@ -232,7 +265,7 @@ def draw_results(frame_path: Path, detections: list[dict], name_lookup: dict[str
     for det in detections:
         x0, y0, x1, y1 = det["box"]
         card_id, sim = det["top"][0]
-        card_name = name_lookup.get(card_id, card_id)
+        card_name = catalog.get(card_id, {}).get("name", card_id)
         label = f"{card_name}  [{card_id}]  {sim:.3f}"
 
         # Bounding box
@@ -261,9 +294,9 @@ def main() -> None:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("Building card name lookup from pokemon-tcg-data...")
-    name_lookup = build_name_lookup()
-    print(f"  {len(name_lookup)} cards loaded")
+    print("Building card catalog from pokemon-tcg-data...")
+    catalog = build_card_catalog()
+    print(f"  {len(catalog)} cards loaded")
 
     card_paths = sorted(
         p for p in CARD_IMAGES_DIR.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg"}
@@ -284,6 +317,16 @@ def main() -> None:
     print("\n[Phase 1] Building reference index...")
     ref_embs, card_ids = build_index(model, card_paths)
 
+    # Build per-class masks and report counts
+    class_masks = build_class_masks(card_ids, catalog)
+    n_energy = int(class_masks[0].sum())
+    n_tool   = int(class_masks[1].sum())
+    print(f"  Class 0 (energy): {n_energy} valid cards, Class 1 (item): {n_tool} valid cards")
+    if n_energy == 0:
+        print("  WARNING: no Energy cards found in index — class 0 will fall back to full search")
+    if n_tool == 0:
+        print("  WARNING: no Pokémon Tool cards found in index — class 1 will fall back to full search")
+
     # Run inference on crops
     print("\n[Phase 2] Matching crops...")
     inf_ms = []
@@ -297,14 +340,11 @@ def main() -> None:
         for det in detections:
             emb, ms = model.embed_single(det["crop"])
             inf_ms.append(ms)
-            det["top"] = match_crop(emb, ref_embs, card_ids)
-
-            cid, sim = det["top"][0]
-            name = name_lookup.get(cid, cid)
-            cid2, sim2 = det["top"][1]
+            valid_mask = class_masks.get(det["cls"])  # None for cls 2/3
+            det["top"] = match_crop(emb, ref_embs, card_ids, valid_mask=valid_mask)
 
         out_path = OUTPUT_DIR / f"{frame_stem}_annotated.png"
-        draw_results(detections[0]["frame_path"], detections, name_lookup, out_path)
+        draw_results(detections[0]["frame_path"], detections, catalog, out_path)
 
     # Timing summary
     print("\n" + "=" * 55)
