@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Split labeled data into train/val sets in ultralytics YOLO format.
+
+Reads:  data/frames/ + data/labels/
+Writes: outputs/detection/dataset/{train,val}/{images,labels}/
+
+Usage:
+    python detection/prepare_dataset.py [--val-ratio 0.2] [--seed 42]
+"""
+
+import argparse
+import random
+import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+FRAMES_DIR = Path("data/frames")
+LABELS_DIR = Path("data/labels")
+DATASET_DIR = Path("outputs/detection/dataset")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Prepare train/val split for YOLO training")
+    parser.add_argument("--val-ratio", type=float, default=0.2, help="Fraction of data for validation")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    args = parser.parse_args()
+
+    # Find all label files that have a matching image
+    pairs = []
+    for label_path in sorted(LABELS_DIR.glob("*.txt")):
+        img_path = FRAMES_DIR / f"{label_path.stem}.png"
+        if img_path.exists():
+            pairs.append((img_path, label_path))
+
+    if not pairs:
+        print(f"No image/label pairs found in {FRAMES_DIR} + {LABELS_DIR}")
+        sys.exit(1)
+
+    print(f"Found {len(pairs)} image/label pairs")
+
+    # Shuffle and split
+    random.seed(args.seed)
+    random.shuffle(pairs)
+    split_idx = max(1, int(len(pairs) * (1 - args.val_ratio)))
+    train_pairs = pairs[:split_idx]
+    val_pairs = pairs[split_idx:]
+
+    print(f"Train: {len(train_pairs)}, Val: {len(val_pairs)}")
+
+    # Create output directories and copy files
+    for split_name, split_pairs in [("train", train_pairs), ("val", val_pairs)]:
+        img_dir = DATASET_DIR / split_name / "images"
+        lbl_dir = DATASET_DIR / split_name / "labels"
+        img_dir.mkdir(parents=True, exist_ok=True)
+        lbl_dir.mkdir(parents=True, exist_ok=True)
+
+        for img_path, label_path in split_pairs:
+            shutil.copy2(img_path, img_dir / img_path.name)
+            shutil.copy2(label_path, lbl_dir / label_path.name)
+
+    print(f"Dataset written to {DATASET_DIR}/")
+
+
+if __name__ == "__main__":
+    main()

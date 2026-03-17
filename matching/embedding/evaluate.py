@@ -2,23 +2,23 @@
 """
 Embedding-based Pokemon TCG card identification — proof of concept.
 
-Reference index: card_images/          (one image per card, from match_cards.py)
-Query images:    label_studio_export/  (YOLO-labelled video frames; crops class 2=card, 3=multicard)
+Reference index: data/card_images/       (one image per card, from match_cards.py)
+Query images:    data/frames/ + data/labels/  (YOLO-labelled video frames)
 
-Output: embedding_poc/output/  — original frames annotated with bounding boxes and top-1 match labels
+Output: outputs/match_results/{model}/  — original frames annotated with bounding boxes and top-1 match labels
 
 Run:
-    python embedding_poc/evaluate.py
+    python matching/embedding/evaluate.py
 """
 
 import json
 import sys
-import os
 import time
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from extract_regions import mask_overlapping_regions, OVERLAY_CLASSES  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from utils import OVERLAY_CLASSES, mask_overlapping_regions, parse_yolo_labels
 
 import numpy as np
 import timm
@@ -28,12 +28,12 @@ from PIL import Image, ImageDraw, ImageFont
 from timm.data import resolve_data_config
 from tqdm import tqdm
 
-CARD_IMAGES_DIR = Path("card_images")
-FRAMES_DIR = Path("label_studio_export/images")
-LABELS_DIR = Path("label_studio_export/labels")
+CARD_IMAGES_DIR = Path("data/card_images")
+FRAMES_DIR = Path("data/frames")
+LABELS_DIR = Path("data/labels")
 TCG_CARDS_DIR = Path("pokemon-tcg-data/cards/en")
-OUTPUT_BASE_DIR = Path("embedding_poc/output")
-EMBED_CACHE_DIR = Path("embedding_poc")
+OUTPUT_BASE_DIR = Path("outputs/match_results")
+EMBED_CACHE_DIR = Path("outputs/embeddings")
 
 TOP_N = 5
 
@@ -86,10 +86,8 @@ def build_class_masks(card_ids: list[str], catalog: dict[str, dict]) -> dict[int
 # ---------------------------------------------------------------------------
 
 def _make_transform(model):
-    """Preprocessing callable from timm's data config.
-    Avoids all torchvision PIL→tensor helpers that break under numpy 2.x."""
     cfg = resolve_data_config(model.pretrained_cfg)
-    input_size = cfg["input_size"]          # (C, H, W)
+    input_size = cfg["input_size"]
     h, w = input_size[1], input_size[2]
     crop_pct = cfg.get("crop_pct", 0.875)
     scale_size = int(round(min(h, w) / crop_pct))
@@ -126,22 +124,7 @@ def load_frame_crops(frames_dir: Path, labels_dir: Path) -> list[dict]:
             continue
 
         W, H = frame.size
-
-        # Parse all boxes for this frame first so masking can reference overlay regions
-        frame_boxes = []
-        for line in label_path.read_text().splitlines():
-            parts = line.strip().split()
-            if len(parts) != 5:
-                continue
-            cls = int(parts[0])
-            xc, yc, bw, bh = map(float, parts[1:])
-            x0 = max(0, int((xc - bw / 2) * W))
-            y0 = max(0, int((yc - bh / 2) * H))
-            x1 = min(W, int((xc + bw / 2) * W))
-            y1 = min(H, int((yc + bh / 2) * H))
-            if x1 <= x0 or y1 <= y0:
-                continue
-            frame_boxes.append((cls, x0, y0, x1, y1))
+        frame_boxes = parse_yolo_labels(label_path, W, H)
 
         for cls, x0, y0, x1, y1 in frame_boxes:
             crop = frame.crop((x0, y0, x1, y1))
@@ -172,7 +155,6 @@ class EmbeddingModel:
 
     @torch.no_grad()
     def embed_batch(self, images: list[Image.Image]) -> np.ndarray:
-        """Embed a list of PIL images → (N, D) float32 L2-normalised."""
         tensors = torch.stack([self.transform(img) for img in images])
         feats = np.array(self.model(tensors).tolist(), dtype=np.float32)
         norms = np.linalg.norm(feats, axis=1, keepdims=True)
@@ -181,7 +163,6 @@ class EmbeddingModel:
 
     @torch.no_grad()
     def embed_single(self, img: Image.Image) -> tuple[np.ndarray, float]:
-        """Embed one image; return ((D,) embedding, inference_ms)."""
         tensor = self.transform(img).unsqueeze(0)
         t0 = time.perf_counter()
         feats = np.array(self.model(tensor).tolist(), dtype=np.float32)
@@ -195,7 +176,6 @@ class EmbeddingModel:
 # ---------------------------------------------------------------------------
 
 def _cache_key(card_paths: list[Path], model_name: str) -> str:
-    """A fingerprint of the current card image set + model — sorted stems joined."""
     return model_name + "|" + ",".join(p.stem for p in card_paths)
 
 
@@ -207,7 +187,6 @@ def _embed_cache_path(model_name: str) -> Path:
 def build_index(
     model: EmbeddingModel, card_paths: list[Path], batch_size: int = 64
 ) -> tuple[np.ndarray, list[str]]:
-    """Return (embeddings [N,D], card_ids [N]), loading from cache when valid."""
     cache_path = _embed_cache_path(model.name)
     current_key = _cache_key(card_paths, model.name)
 
@@ -251,7 +230,6 @@ def match_crop(
     top_n: int = TOP_N,
     valid_mask: np.ndarray | None = None,
 ) -> list[tuple[str, float]]:
-    """Return top-N (card_id, cosine_similarity), optionally restricted to valid_mask."""
     if valid_mask is not None and valid_mask.any():
         idx = np.where(valid_mask)[0]
         sims_sub = ref_embeddings[idx] @ query_emb
@@ -277,7 +255,6 @@ def _load_font(size: int):
 
 
 def draw_results(frame_path: Path, detections: list[dict], catalog: dict[str, dict], out_path: Path) -> None:
-    """Draw bounding boxes + top-1 match labels onto a copy of the frame and save."""
     img = Image.open(frame_path).convert("RGB")
     draw = ImageDraw.Draw(img)
     font = _load_font(16)
@@ -288,10 +265,8 @@ def draw_results(frame_path: Path, detections: list[dict], catalog: dict[str, di
         card_name = catalog.get(card_id, {}).get("name", card_id)
         label = f"{card_name}  [{card_id}]  {sim:.3f}"
 
-        # Bounding box
         draw.rectangle([x0, y0, x1, y1], outline=BOX_COLOR, width=BOX_WIDTH)
 
-        # Label background + text just above the box
         bbox = draw.textbbox((0, 0), label, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
         pad = 3
@@ -329,7 +304,6 @@ def main() -> None:
         raise SystemExit("No card crops found — check FRAMES_DIR / LABELS_DIR paths")
     print(f"Query crops     : {len(crops)}")
 
-    # Load model + build index
     # model = EmbeddingModel("DINOv2-ViT-S/14", "vit_small_patch14_dinov2.lvd142m")
     model = EmbeddingModel("MobileNetV4", "mobilenetv4_conv_small.e2400_r224_in1k")
     safe_name = model.name.replace("/", "_").replace(" ", "_")
@@ -339,7 +313,6 @@ def main() -> None:
     print("\n[Phase 1] Building reference index...")
     ref_embs, card_ids = build_index(model, card_paths)
 
-    # Build per-class masks and report counts
     class_masks = build_class_masks(card_ids, catalog)
     n_energy = int(class_masks[0].sum())
     n_tool   = int(class_masks[1].sum())
@@ -349,11 +322,9 @@ def main() -> None:
     if n_tool == 0:
         print("  WARNING: no Pokémon Tool cards found in index — class 1 will fall back to full search")
 
-    # Run inference on crops
     print("\n[Phase 2] Matching crops...")
     inf_ms = []
 
-    # Group crops by frame so we can draw all boxes onto each frame at once
     frames: dict[str, list[dict]] = {}
     for entry in crops:
         frames.setdefault(entry["frame_stem"], []).append(entry)
@@ -362,13 +333,12 @@ def main() -> None:
         for det in detections:
             emb, ms = model.embed_single(det["crop"])
             inf_ms.append(ms)
-            valid_mask = class_masks.get(det["cls"])  # None for cls 2/3
+            valid_mask = class_masks.get(det["cls"])
             det["top"] = match_crop(emb, ref_embs, card_ids, valid_mask=valid_mask)
 
         out_path = output_dir / f"{frame_stem}_annotated.png"
         draw_results(detections[0]["frame_path"], detections, catalog, out_path)
 
-    # Timing summary
     print("\n" + "=" * 55)
     print(f"  TIMING SUMMARY  ({model.name})")
     print("=" * 55)

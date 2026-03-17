@@ -1,14 +1,41 @@
-#!/usr/bin/env python3
-"""Extract YOLO-labeled regions from frames and save as individual crops."""
+"""Shared constants and utilities for the pokematching pipeline."""
 
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageStat
-import re
 
+# YOLO class definitions
 CLASSES = {0: "attached-energy", 1: "attached-item", 2: "card", 3: "multicard"}
 CARD_CLASS = 2
 OVERLAY_CLASSES = {0, 1}  # attached-energy, attached-item
 BORDER_FRAC = 0.1  # halo width as a fraction of each intersection rect's smaller dimension
+
+
+def parse_yolo_labels(label_path: Path, img_w: int, img_h: int) -> list[tuple]:
+    """Parse a YOLO label file into pixel-coordinate bounding boxes.
+
+    Args:
+        label_path: Path to a YOLO-format .txt label file
+        img_w: Image width in pixels
+        img_h: Image height in pixels
+
+    Returns:
+        List of (class_id, x1, y1, x2, y2) tuples in pixel coordinates.
+    """
+    boxes = []
+    for line in label_path.read_text().splitlines():
+        parts = line.strip().split()
+        if len(parts) != 5:
+            continue
+        cls = int(parts[0])
+        xc, yc, bw, bh = float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+        x1 = max(0, int((xc - bw / 2) * img_w))
+        y1 = max(0, int((yc - bh / 2) * img_h))
+        x2 = min(img_w, int((xc + bw / 2) * img_w))
+        y2 = min(img_h, int((yc + bh / 2) * img_h))
+        if x2 > x1 and y2 > y1:
+            boxes.append((cls, x1, y1, x2, y2))
+    return boxes
+
 
 def mask_overlapping_regions(
     crop: Image.Image, crop_box: tuple, all_boxes: list
@@ -72,53 +99,3 @@ def mask_overlapping_regions(
         draw.rectangle(rect, fill=color)
 
     return crop
-
-
-if __name__ == "__main__":
-    labels_dir = Path("label_studio_export/labels")
-    frames_dir = Path("label_studio_export/images")
-    output_dir = Path("extracted_regions")
-    output_dir.mkdir(exist_ok=True)
-
-    total = 0
-    for label_file in sorted(labels_dir.glob("*.txt")):
-        lines = label_file.read_text().splitlines()
-        lines = [l for l in lines if l.strip()]
-        if not lines:
-            continue
-
-        match = re.search(r"(frame_\d+)", label_file.stem)
-        if not match:
-            print(f"Skipping {label_file.name}: can't parse frame number")
-            continue
-        frame_name = match.group(1)
-
-        image_path = frames_dir / f"{label_file.stem}.png"
-        if not image_path.exists():
-            print(f"Missing image: {image_path}")
-            continue
-
-        img = Image.open(image_path)
-        W, H = img.size
-
-        boxes = []
-        for line in lines:
-            parts = line.split()
-            class_id = int(parts[0])
-            xc, yc, w, h = float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
-            x1 = int((xc - w / 2) * W)
-            y1 = int((yc - h / 2) * H)
-            x2 = int((xc + w / 2) * W)
-            y2 = int((yc + h / 2) * H)
-            boxes.append((class_id, x1, y1, x2, y2))
-
-        for i, (class_id, x1, y1, x2, y2) in enumerate(boxes):
-            crop = img.crop((x1, y1, x2, y2))
-            if class_id == CARD_CLASS:
-                mask_overlapping_regions(crop, (x1, y1, x2, y2), boxes)
-            class_name = CLASSES.get(class_id, str(class_id))
-            out_path = output_dir / f"{frame_name}_{i}_{class_name}.png"
-            crop.save(out_path)
-            total += 1
-
-    print(f"Saved {total} crops to {output_dir}/")

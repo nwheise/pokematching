@@ -2,9 +2,13 @@
 """Match extracted card crops against Pokemon TCG reference images using ORB feature matching."""
 
 import json
+import re
 import sys
 import time
+from collections import defaultdict
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import cv2
 import numpy as np
@@ -13,10 +17,10 @@ from tqdm import tqdm
 
 CARDS_DIR = Path("pokemon-tcg-data/cards/en")
 SETS_FILE = Path("pokemon-tcg-data/sets/en.json")
-EXTRACTED_DIR = Path("extracted_regions")
-CACHE_DIR = Path("card_images")
-DESC_CACHE = Path("card_descriptors.npz")
-OUTPUT_FILE = Path("match_results.json")
+EXTRACTED_DIR = Path("outputs/extracted_regions")
+CACHE_DIR = Path("data/card_images")
+DESC_CACHE = Path("outputs/match_results/card_descriptors.npz")
+OUTPUT_FILE = Path("outputs/match_results/match_results.json")
 REF_WIDTH = 245
 ORB_FEATURES = 500
 TOP_N = 5
@@ -55,7 +59,7 @@ def build_catalog():
 # --- Phase 2: Download & cache reference images ---
 
 def download_images(catalog):
-    CACHE_DIR.mkdir(exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
     to_download = [c for c in catalog if not (CACHE_DIR / f"{c['id']}.png").exists()]
     if not to_download:
         print("All reference images already cached.")
@@ -80,14 +84,6 @@ def download_images(catalog):
 
 
 # --- Phase 3: Load or compute ORB descriptor index ---
-#
-# Descriptors are stacked into one matrix for batch matching:
-#   all_desc  : (N_total, 32) uint8  — all reference descriptors concatenated
-#   card_idx  : (N_total,)    int32  — maps each row → card index
-#   card_ids  : list[str]             — card ID per index
-#   card_names: list[str]             — card name per index
-#
-# The cache is invalidated if the set of cached image files changes.
 
 def _cached_image_ids():
     return sorted(p.stem for p in CACHE_DIR.glob("*.png"))
@@ -95,7 +91,6 @@ def _cached_image_ids():
 def load_or_build_index(catalog):
     orb = cv2.ORB_create(nfeatures=ORB_FEATURES)
 
-    # Check if disk cache is valid
     if DESC_CACHE.exists():
         data = np.load(DESC_CACHE, allow_pickle=True)
         cached_ids = data["image_ids"].tolist()
@@ -105,7 +100,6 @@ def load_or_build_index(catalog):
                    data["card_ids"].tolist(), data["card_names"].tolist()
         print("Descriptor cache stale — rebuilding...")
 
-    # Build lookup from id -> catalog entry
     catalog_map = {c["id"]: c["name"] for c in catalog}
 
     all_desc_list = []
@@ -132,9 +126,10 @@ def load_or_build_index(catalog):
     if missing:
         print(f"  Skipped {missing} unreadable images")
 
-    all_desc = np.vstack(all_desc_list)         # (N_total, 32) uint8
-    card_idx = np.concatenate(card_idx_list)    # (N_total,)    int32
+    all_desc = np.vstack(all_desc_list)
+    card_idx = np.concatenate(card_idx_list)
 
+    DESC_CACHE.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
         DESC_CACHE,
         all_desc=all_desc,
@@ -149,7 +144,7 @@ def load_or_build_index(catalog):
 
 # --- Phase 4: Match crops ---
 
-CHUNK = 200_000  # BFMatcher hard limit is 2^18 rows per matrix
+CHUNK = 200_000
 
 def match_crop(crop_path, orb, all_desc, card_idx, card_ids, card_names, bf):
     img = cv2.imread(str(crop_path), cv2.IMREAD_GRAYSCALE)
@@ -169,7 +164,6 @@ def match_crop(crop_path, orb, all_desc, card_idx, card_ids, card_names, bf):
         chunk_desc = all_desc[start:start + CHUNK]
         chunk_idx  = card_idx[start:start + CHUNK]
         pairs = bf.knnMatch(des, chunk_desc, k=2)
-        # Vectorised ratio test
         good = [p for p in pairs if len(p) == 2 and p[0].distance < 0.75 * p[1].distance]
         if good:
             train_idx = np.array([p[0].trainIdx for p in good], dtype=np.int32)
@@ -186,9 +180,6 @@ def match_crop(crop_path, orb, all_desc, card_idx, card_ids, card_names, bf):
 
 
 def group_crops_by_frame(crops):
-    """Return OrderedDict of frame_name -> [crop_path, ...]  sorted by frame."""
-    from collections import defaultdict
-    import re
     groups = defaultdict(list)
     for p in crops:
         m = re.match(r"(frame_\d+)", p.name)
@@ -223,6 +214,7 @@ def main():
             else:
                 print(f"  {crop_path.name:35s} -> no match")
 
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_FILE.write_text(json.dumps(results, indent=2))
     print(f"\nResults saved to {OUTPUT_FILE}")
 

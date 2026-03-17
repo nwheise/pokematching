@@ -7,3 +7,4 @@ label-studio
 timm
 torch
 torchvision
+ultralytics
