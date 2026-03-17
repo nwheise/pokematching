@@ -15,7 +15,6 @@ pip install -r requirements.txt
 ### 1. Labeling (Label Studio)
 
 ```bash
-source venv/bin/activate
 label-studio start
 # UI at http://localhost:8080
 ```

@@ -16,7 +16,7 @@ import numpy as np
 from tqdm import tqdm
 
 EXTRACTED_DIR = Path("outputs/extracted_regions")
-DESC_CACHE = Path("outputs/match_results/card_descriptors.npz")
+DESC_CACHE = Path("outputs/orb/card_descriptors.npz")
 OUTPUT_FILE = Path("outputs/match_results/match_results.json")
 REF_WIDTH = 245
 ORB_FEATURES = 500
