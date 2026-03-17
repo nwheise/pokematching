@@ -4,25 +4,66 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A pipeline for identifying Pokemon TCG cards from video frames using computer vision. The workflow is:
+A pipeline for identifying Pokemon TCG cards from video frames using computer vision. The pipeline stages are:
 
-1. **Label Studio** annotates video frames with YOLO bounding boxes for card regions
-2. **`extract_regions.py`** crops those regions from frames into individual images
-3. **`match_cards.py`** matches the crops against reference card images using ORB feature matching
+1. **Labeling** — Label Studio annotates video frames with YOLO bounding boxes
+2. **Extraction** (`extraction/`) — Crops labeled regions from frames into individual images
+3. **Detection** (`detection/`) — Train and run YOLO object detection models (ultralytics)
+4. **Matching** (`matching/`) — Match detected card crops against reference card images
+5. **Results** — Output in `outputs/`
+
+## Directory Structure
+
+```
+extraction/            # Crop YOLO-labeled regions from frames
+detection/             # YOLO model training, inference, dataset prep
+  prepare_dataset.py   # Split labels into train/val
+  train.py             # Ultralytics YOLO training
+  detect.py            # Run trained model on new frames
+  dataset.yaml         # Ultralytics dataset config
+matching/              # Card identification approaches
+  card_catalog.py      # Shared catalog building and reference image downloading
+  orb/                 # ORB feature matching
+  embedding/           # DINOv2/MobileNetV4 embedding matching
+utils/                 # Shared constants and utilities
+  common.py            # CLASSES, parse_yolo_labels, mask_overlapping_regions
+
+data/                  # Shared input data (gitignored)
+  frames/              # Source video frame PNGs
+  labels/              # YOLO-format .txt label files
+  card_images/         # Downloaded reference card images
+
+outputs/               # All pipeline outputs (gitignored)
+  extracted_regions/   # Crops from extraction stage
+  detection/           # Training runs, weights, predictions
+  match_results/       # Match outputs, ORB descriptor cache
+  embeddings/          # Cached embedding .npz files
+
+pokemon-tcg-data/      # Git submodule: card/set JSON data
+```
 
 ## Running the Pipeline
 
 ```bash
-# Step 1: Extract labeled regions from frames
-python extract_regions.py
-# Reads: label-studio-export/labels/*.txt + frames/*.png
-# Writes: extracted/*.png
+# Step 1: Export labels from Label Studio into data/frames/ and data/labels/
 
-# Step 2: Match crops to Pokemon TCG cards
-python match_cards.py
-# Downloads reference card images to card_images/ on first run
-# Caches ORB descriptors to card_descriptors.npz
-# Writes: match_results.json
+# Step 2: Extract labeled regions from frames
+python extraction/extract_regions.py
+
+# Step 3a: Prepare dataset for training
+python detection/prepare_dataset.py
+
+# Step 3b: Train YOLO detector
+python detection/train.py
+
+# Step 3c: Run detector on new frames
+python detection/detect.py
+
+# Step 4: Match crops to Pokemon TCG cards (ORB approach)
+python matching/orb/match_cards.py
+
+# Step 4 alt: Match using embeddings
+python matching/embedding/evaluate.py
 ```
 
 ## Label Studio
@@ -40,28 +81,25 @@ Uses Python 3.11.9 via pyenv (avoids `pkgutil.find_loader` error in Python 3.14)
 Create and activate the project virtualenv using Python 3.11.9 via pyenv:
 
 ```bash
-~/.pyenv/versions/3.11.9/bin/python -m venv ~/.venvs/pokematching-venv
-source ~/.venvs/pokematching-venv/bin/activate
+~/.pyenv/versions/3.11.9/bin/python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Key Directories (runtime-generated, not in git)
-
-- `frames/` — source video frame PNGs
-- `label-studio-export/labels/` — YOLO-format `.txt` label files from Label Studio export
-- `extracted/` — cropped card regions output by `extract_regions.py`
-- `card_images/` — downloaded reference card images (cached)
-- `card_descriptors.npz` — cached ORB descriptor index (invalidated when `card_images/` changes)
-- `match_results.json` — final match output
-
 ## Architecture Notes
 
-**`extract_regions.py`** is a simple script; frame filenames must contain `frame_\d+` to match label files to images. YOLO label format: `class_id x_center y_center width height` (normalized 0–1). Classes: `{0: attached-energy, 1: attached-item, 2: card, 3: multicard}`.
+**`utils/common.py`** contains shared constants (`CLASSES`, `CARD_CLASS`, `OVERLAY_CLASSES`) and utilities (`parse_yolo_labels`, `mask_overlapping_regions`) used across pipeline stages.
 
-**`match_cards.py`** has four phases:
-1. **Catalog** — reads `pokemon-tcg-data/` submodule JSON to find Standard-legal cards with image URLs
-2. **Download** — fetches card images at ≤10 req/s, cached in `card_images/`
-3. **Index** — computes ORB descriptors for all reference images, stacked into a single matrix for batch matching; cached in `card_descriptors.npz`
-4. **Match** — for each crop, runs BFMatcher with Lowe's ratio test (0.75) against the descriptor index in 200k-row chunks; returns top-5 matches by inlier count
+**YOLO label format:** `class_id x_center y_center width height` (normalized 0–1). Classes: `{0: attached-energy, 1: attached-item, 2: card, 3: multicard}`.
+
+**`extraction/extract_regions.py`** — frame filenames must contain `frame_\d+` to match label files to images.
+
+**`matching/card_catalog.py`** — shared module for building the card catalog from `pokemon-tcg-data/` JSON and downloading reference card images to `data/card_images/` (rate-limited to ≤10 req/s). Used by both matching approaches.
+
+**`matching/orb/match_cards.py`** — ORB feature matching: builds descriptor index (cached in `outputs/match_results/card_descriptors.npz`), then matches crops via BFMatcher with Lowe's ratio test (0.75) in 200k-row chunks, returning top-5 by inlier count.
+
+**`matching/embedding/evaluate.py`** — proof-of-concept using DINOv2 or MobileNetV4 embeddings with cosine similarity matching and class-based filtering masks.
+
+**`detection/`** — uses ultralytics YOLOv8. `prepare_dataset.py` splits data into train/val. `train.py` and `detect.py` are minimal wrappers around the ultralytics API.
 
 The submodule `pokemon-tcg-data` provides card/set JSON data from `git@github.com:PokemonTCG/pokemon-tcg-data.git`.

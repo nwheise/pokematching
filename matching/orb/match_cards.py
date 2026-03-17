@@ -2,100 +2,35 @@
 """Match extracted card crops against Pokemon TCG reference images using ORB feature matching."""
 
 import json
+import re
 import sys
-import time
+from collections import defaultdict
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from matching.card_catalog import CARD_IMAGES_DIR, build_catalog, download_images
 
 import cv2
 import numpy as np
-import requests
 from tqdm import tqdm
 
-CARDS_DIR = Path("pokemon-tcg-data/cards/en")
-SETS_FILE = Path("pokemon-tcg-data/sets/en.json")
-EXTRACTED_DIR = Path("extracted_regions")
-CACHE_DIR = Path("card_images")
-DESC_CACHE = Path("card_descriptors.npz")
-OUTPUT_FILE = Path("match_results.json")
+EXTRACTED_DIR = Path("outputs/extracted_regions")
+DESC_CACHE = Path("outputs/orb/card_descriptors.npz")
+OUTPUT_FILE = Path("outputs/match_results/match_results.json")
 REF_WIDTH = 245
 ORB_FEATURES = 500
 TOP_N = 5
 
 
-# --- Phase 1: Build card catalog (standard-legal sets and cards only) ---
-
-def build_catalog():
-    sets = json.loads(SETS_FILE.read_text())
-    legal_set_ids = {
-        s["id"] for s in sets
-        if s.get("legalities", {}).get("standard") == "Legal"
-    }
-    print(f"Standard-legal sets: {len(legal_set_ids)}")
-
-    catalog = []
-    for set_id in legal_set_ids:
-        json_file = CARDS_DIR / f"{set_id}.json"
-        if not json_file.exists():
-            continue
-        for card in json.loads(json_file.read_text()):
-            if card.get("legalities", {}).get("standard") != "Legal":
-                continue
-            small_url = card.get("images", {}).get("small")
-            if not small_url:
-                continue
-            catalog.append({
-                "id": card["id"],
-                "name": card["name"],
-                "small_url": small_url,
-            })
-    print(f"Catalog: {len(catalog)} standard-legal cards")
-    return catalog
-
-
-# --- Phase 2: Download & cache reference images ---
-
-def download_images(catalog):
-    CACHE_DIR.mkdir(exist_ok=True)
-    to_download = [c for c in catalog if not (CACHE_DIR / f"{c['id']}.png").exists()]
-    if not to_download:
-        print("All reference images already cached.")
-        return
-
-    min_interval = 1.0 / 10  # 10 requests per second max
-    session = requests.Session()
-    last_request = 0.0
-    for card in tqdm(to_download, desc="Downloading card images"):
-        dest = CACHE_DIR / f"{card['id']}.png"
-        elapsed = time.monotonic() - last_request
-        if elapsed < min_interval:
-            time.sleep(min_interval - elapsed)
-        try:
-            resp = session.get(card["small_url"], timeout=10)
-            last_request = time.monotonic()
-            resp.raise_for_status()
-            dest.write_bytes(resp.content)
-        except Exception as e:
-            last_request = time.monotonic()
-            print(f"  Warning: failed to download {card['id']}: {e}", file=sys.stderr)
-
-
-# --- Phase 3: Load or compute ORB descriptor index ---
-#
-# Descriptors are stacked into one matrix for batch matching:
-#   all_desc  : (N_total, 32) uint8  — all reference descriptors concatenated
-#   card_idx  : (N_total,)    int32  — maps each row → card index
-#   card_ids  : list[str]             — card ID per index
-#   card_names: list[str]             — card name per index
-#
-# The cache is invalidated if the set of cached image files changes.
+# --- Load or compute ORB descriptor index ---
 
 def _cached_image_ids():
-    return sorted(p.stem for p in CACHE_DIR.glob("*.png"))
+    return sorted(p.stem for p in CARD_IMAGES_DIR.glob("*.png"))
 
 def load_or_build_index(catalog):
     orb = cv2.ORB_create(nfeatures=ORB_FEATURES)
 
-    # Check if disk cache is valid
     if DESC_CACHE.exists():
         data = np.load(DESC_CACHE, allow_pickle=True)
         cached_ids = data["image_ids"].tolist()
@@ -105,7 +40,6 @@ def load_or_build_index(catalog):
                    data["card_ids"].tolist(), data["card_names"].tolist()
         print("Descriptor cache stale — rebuilding...")
 
-    # Build lookup from id -> catalog entry
     catalog_map = {c["id"]: c["name"] for c in catalog}
 
     all_desc_list = []
@@ -114,7 +48,7 @@ def load_or_build_index(catalog):
     card_names = []
     missing = 0
 
-    for path in tqdm(sorted(CACHE_DIR.glob("*.png")), desc="Computing ORB descriptors"):
+    for path in tqdm(sorted(CARD_IMAGES_DIR.glob("*.png")), desc="Computing ORB descriptors"):
         card_id = path.stem
         img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
         if img is None:
@@ -132,9 +66,10 @@ def load_or_build_index(catalog):
     if missing:
         print(f"  Skipped {missing} unreadable images")
 
-    all_desc = np.vstack(all_desc_list)         # (N_total, 32) uint8
-    card_idx = np.concatenate(card_idx_list)    # (N_total,)    int32
+    all_desc = np.vstack(all_desc_list)
+    card_idx = np.concatenate(card_idx_list)
 
+    DESC_CACHE.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
         DESC_CACHE,
         all_desc=all_desc,
@@ -147,9 +82,9 @@ def load_or_build_index(catalog):
     return orb, all_desc, card_idx, card_ids, card_names
 
 
-# --- Phase 4: Match crops ---
+# --- Match crops ---
 
-CHUNK = 200_000  # BFMatcher hard limit is 2^18 rows per matrix
+CHUNK = 200_000
 
 def match_crop(crop_path, orb, all_desc, card_idx, card_ids, card_names, bf):
     img = cv2.imread(str(crop_path), cv2.IMREAD_GRAYSCALE)
@@ -169,7 +104,6 @@ def match_crop(crop_path, orb, all_desc, card_idx, card_ids, card_names, bf):
         chunk_desc = all_desc[start:start + CHUNK]
         chunk_idx  = card_idx[start:start + CHUNK]
         pairs = bf.knnMatch(des, chunk_desc, k=2)
-        # Vectorised ratio test
         good = [p for p in pairs if len(p) == 2 and p[0].distance < 0.75 * p[1].distance]
         if good:
             train_idx = np.array([p[0].trainIdx for p in good], dtype=np.int32)
@@ -186,9 +120,6 @@ def match_crop(crop_path, orb, all_desc, card_idx, card_ids, card_names, bf):
 
 
 def group_crops_by_frame(crops):
-    """Return OrderedDict of frame_name -> [crop_path, ...]  sorted by frame."""
-    from collections import defaultdict
-    import re
     groups = defaultdict(list)
     for p in crops:
         m = re.match(r"(frame_\d+)", p.name)
@@ -223,6 +154,7 @@ def main():
             else:
                 print(f"  {crop_path.name:35s} -> no match")
 
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_FILE.write_text(json.dumps(results, indent=2))
     print(f"\nResults saved to {OUTPUT_FILE}")
 

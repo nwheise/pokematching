@@ -1,11 +1,26 @@
 .DS_Store
 
-card_images/
-extracted_regions/
-label_studio_export/
-embedding_poc/output*
+# Shared data directories
+data/frames/
+data/labels/
+data/card_images/
 
-match_results.json
+# All pipeline outputs
+outputs/
+
+# Ultralytics training runs
+runs/
+
+# Model weights
+*.pt
+
+# Cached descriptors / embeddings
 *.npz
+
+# Virtualenvs
+venv/
+
+# Media and bytecode
+__pycache__/
 *.mov
 *.pyc
