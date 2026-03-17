@@ -22,6 +22,7 @@ detection/             # YOLO model training, inference, dataset prep
   detect.py            # Run trained model on new frames
   dataset.yaml         # Ultralytics dataset config
 matching/              # Card identification approaches
+  card_catalog.py      # Shared catalog building and reference image downloading
   orb/                 # ORB feature matching
   embedding/           # DINOv2/MobileNetV4 embedding matching
 utils/                 # Shared constants and utilities
@@ -80,8 +81,8 @@ Uses Python 3.11.9 via pyenv (avoids `pkgutil.find_loader` error in Python 3.14)
 Create and activate the project virtualenv using Python 3.11.9 via pyenv:
 
 ```bash
-~/.pyenv/versions/3.11.9/bin/python -m venv ~/.venvs/pokematching-venv
-source ~/.venvs/pokematching-venv/bin/activate
+~/.pyenv/versions/3.11.9/bin/python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -93,7 +94,9 @@ pip install -r requirements.txt
 
 **`extraction/extract_regions.py`** — frame filenames must contain `frame_\d+` to match label files to images.
 
-**`matching/orb/match_cards.py`** has four phases: catalog (reads pokemon-tcg-data JSON for Standard-legal cards), download (fetches card images at ≤10 req/s), index (ORB descriptors cached in `outputs/match_results/card_descriptors.npz`), match (BFMatcher with Lowe's ratio test 0.75 in 200k-row chunks, top-5 by inlier count).
+**`matching/card_catalog.py`** — shared module for building the card catalog from `pokemon-tcg-data/` JSON and downloading reference card images to `data/card_images/` (rate-limited to ≤10 req/s). Used by both matching approaches.
+
+**`matching/orb/match_cards.py`** — ORB feature matching: builds descriptor index (cached in `outputs/match_results/card_descriptors.npz`), then matches crops via BFMatcher with Lowe's ratio test (0.75) in 200k-row chunks, returning top-5 by inlier count.
 
 **`matching/embedding/evaluate.py`** — proof-of-concept using DINOv2 or MobileNetV4 embeddings with cosine similarity matching and class-based filtering masks.
 

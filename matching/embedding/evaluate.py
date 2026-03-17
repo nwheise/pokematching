@@ -11,13 +11,13 @@ Run:
     python matching/embedding/evaluate.py
 """
 
-import json
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from matching.card_catalog import CARD_IMAGES_DIR, build_catalog, download_images
 from utils import OVERLAY_CLASSES, mask_overlapping_regions, parse_yolo_labels
 
 import numpy as np
@@ -28,10 +28,8 @@ from PIL import Image, ImageDraw, ImageFont
 from timm.data import resolve_data_config
 from tqdm import tqdm
 
-CARD_IMAGES_DIR = Path("data/card_images")
 FRAMES_DIR = Path("data/frames")
 LABELS_DIR = Path("data/labels")
-TCG_CARDS_DIR = Path("pokemon-tcg-data/cards/en")
 OUTPUT_BASE_DIR = Path("outputs/match_results")
 EMBED_CACHE_DIR = Path("outputs/embeddings")
 
@@ -44,23 +42,15 @@ BOX_WIDTH  = 3
 
 
 # ---------------------------------------------------------------------------
-# Card catalog from pokemon-tcg-data
+# Card catalog helpers
 # ---------------------------------------------------------------------------
 
-def build_card_catalog() -> dict[str, dict]:
-    """Return {card_id: {"name": ..., "supertype": ..., "subtypes": [...]}} for all cards."""
-    catalog = {}
-    for json_path in TCG_CARDS_DIR.glob("*.json"):
-        try:
-            for card in json.loads(json_path.read_text()):
-                catalog[card["id"]] = {
-                    "name": card.get("name", card["id"]),
-                    "supertype": card.get("supertype", ""),
-                    "subtypes": card.get("subtypes", []),
-                }
-        except Exception:
-            pass
-    return catalog
+def catalog_by_id(catalog: list[dict]) -> dict[str, dict]:
+    """Convert catalog list to {card_id: {name, supertype, subtypes}} dict for lookups."""
+    return {
+        c["id"]: {"name": c["name"], "supertype": c["supertype"], "subtypes": c["subtypes"]}
+        for c in catalog
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -283,12 +273,14 @@ def draw_results(frame_path: Path, detections: list[dict], catalog: dict[str, di
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    for d in (CARD_IMAGES_DIR, FRAMES_DIR, LABELS_DIR, TCG_CARDS_DIR):
+    for d in (CARD_IMAGES_DIR, FRAMES_DIR, LABELS_DIR):
         if not d.is_dir():
             raise SystemExit(f"Error: directory not found: {d}")
 
     print("Building card catalog from pokemon-tcg-data...")
-    catalog = build_card_catalog()
+    catalog_list = build_catalog()
+    download_images(catalog_list)
+    catalog = catalog_by_id(catalog_list)
     print(f"  {len(catalog)} cards loaded")
 
     card_paths = sorted(
