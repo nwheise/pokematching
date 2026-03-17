@@ -2,7 +2,7 @@ pillow
 opencv-python
 requests
 tqdm
-numpy
+numpy<2.0.0
 label-studio
 timm
 torch
