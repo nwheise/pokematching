@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Split labeled data into train/val sets in ultralytics YOLO format.
 
-Reads:  data/frames/ + data/labels/
+Reads:  data/images/ + data/labels/
 Writes: outputs/detection/dataset/{train,val}/{images,labels}/
 
 Usage:
@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.common import CLASSES
 
-FRAMES_DIR = Path("data/frames")
+FRAMES_DIR = Path("data/images")
 LABELS_DIR = Path("data/labels")
 DATASET_DIR = Path("outputs/detection/dataset")
 DATASET_YAML = DATASET_DIR / "dataset.yaml"

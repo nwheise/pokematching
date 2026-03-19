@@ -29,7 +29,7 @@ utils/                 # Shared constants and utilities
   common.py            # CLASSES, parse_yolo_labels, mask_overlapping_regions
 
 data/                  # Shared input data (gitignored)
-  frames/              # Source video frame PNGs
+  images/              # Source video frame PNGs
   labels/              # YOLO-format .txt label files
   card_images/         # Downloaded reference card images
 
@@ -90,7 +90,7 @@ Default model path: `outputs/detection/train/weights/best.pt`
 ## Running the Pipeline
 
 ```bash
-# Step 1: Export labels from Label Studio into data/frames/ and data/labels/
+# Step 1: Export labels from Label Studio into data/images/ and data/labels/
 
 # Step 2: Extract labeled regions from frames
 python extraction/extract_regions.py

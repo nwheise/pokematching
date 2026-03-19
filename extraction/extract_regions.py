@@ -13,7 +13,7 @@ from utils import CARD_CLASS, CLASSES, mask_overlapping_regions, parse_yolo_labe
 
 if __name__ == "__main__":
     labels_dir = Path("data/labels")
-    frames_dir = Path("data/frames")
+    images_dir = Path("data/images")
     output_dir = Path("outputs/extracted_regions")
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -25,7 +25,7 @@ if __name__ == "__main__":
             continue
         frame_name = match.group(1)
 
-        image_path = frames_dir / f"{label_file.stem}.png"
+        image_path = images_dir / f"{label_file.stem}.png"
         if not image_path.exists():
             print(f"Missing image: {image_path}")
             continue

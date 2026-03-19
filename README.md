@@ -54,7 +54,7 @@ ml_backend/            # Label Studio ML backend for YOLO pre-annotation
 utils/                 # Shared constants and utilities
 
 data/                  # Input data (gitignored)
-  frames/              # Source video frame PNGs
+  images/              # Source video frame PNGs
   labels/              # YOLO-format .txt label files
   card_images/         # Downloaded reference card images
 
@@ -88,7 +88,7 @@ LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true label-studio start
 
 Annotate video frames with bounding boxes and export in YOLO format. Place the exported files in:
 
-- Images → `data/frames/`
+- Images → `data/images/`
 - Labels → `data/labels/`
 
 YOLO label format: `class_id x_center y_center width height` (normalized 0–1)

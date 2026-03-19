@@ -3,7 +3,7 @@
 Embedding-based Pokemon TCG card identification — proof of concept.
 
 Reference index: data/card_images/       (one image per card, from match_cards.py)
-Query images:    data/frames/ + data/labels/  (YOLO-labelled video frames)
+Query images:    data/images/ + data/labels/  (YOLO-labelled video frames)
 
 Output: outputs/match_results/{model}/  — original frames annotated with bounding boxes and top-1 match labels
 
@@ -28,7 +28,7 @@ from PIL import Image, ImageDraw, ImageFont
 from timm.data import resolve_data_config
 from tqdm import tqdm
 
-FRAMES_DIR = Path("data/frames")
+FRAMES_DIR = Path("data/images")
 LABELS_DIR = Path("data/labels")
 OUTPUT_BASE_DIR = Path("outputs/match_results")
 EMBED_CACHE_DIR = Path("outputs/embeddings")

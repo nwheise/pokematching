@@ -1,9 +1,7 @@
 .DS_Store
 
 # Shared data directories
-data/frames/
-data/labels/
-data/card_images/
+data/
 
 # All pipeline outputs
 outputs/

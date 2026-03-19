@@ -2,7 +2,7 @@
 """Run a trained YOLO detector on video frames to produce bounding box predictions.
 
 Usage:
-    python detection/detect.py [--model outputs/detection/train/weights/best.pt] [--source data/frames/]
+    python detection/detect.py [--model outputs/detection/train/weights/best.pt] [--source data/images/]
 """
 
 import argparse
@@ -14,7 +14,7 @@ from ultralytics import YOLO
 def main():
     parser = argparse.ArgumentParser(description="Run YOLO inference on frames")
     parser.add_argument("--model", default="outputs/detection/train/weights/best.pt", help="Trained model weights")
-    parser.add_argument("--source", default="data/frames/", help="Directory of frames to run on")
+    parser.add_argument("--source", default="data/images/", help="Directory of frames to run on")
     args = parser.parse_args()
 
     model = YOLO(args.model)
