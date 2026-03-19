@@ -68,18 +68,17 @@ pokemon-tcg-data/      # Submodule: card/set JSON from PokemonTCG/pokemon-tcg-da
 
 ## Running the Pipeline
 
+### Setup
+```bash
+~/.pyenv/versions/3.11.9/bin/python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
 ### 1. Labeling (Label Studio)
 
-Label Studio has a separate venv to avoid dependency conflicts:
-
 ```bash
-# First-time install
-~/.pyenv/versions/3.11.9/bin/python -m venv ~/.venvs/label-studio
-source ~/.venvs/label-studio/bin/activate
-pip install label-studio
-
-# Start Label Studio
-source ~/.venvs/label-studio/bin/activate
+source venv/bin/activate
 label-studio start
 # UI at http://localhost:8080
 ```

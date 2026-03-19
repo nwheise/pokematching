@@ -42,6 +42,24 @@ outputs/               # All pipeline outputs (gitignored)
 pokemon-tcg-data/      # Git submodule: card/set JSON data
 ```
 
+## Setup
+
+Create and activate the project virtualenv using Python 3.11.9 via pyenv:
+
+```bash
+~/.pyenv/versions/3.11.9/bin/python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Label Studio
+
+```bash
+source venv/bin/activate
+label-studio start
+# UI at http://localhost:8080
+```
+
 ## Running the Pipeline
 
 ```bash
@@ -66,25 +84,6 @@ python matching/orb/match_cards.py
 python matching/embedding/evaluate.py
 ```
 
-## Label Studio
-
-```bash
-source ~/.venvs/label-studio/bin/activate
-label-studio start
-# UI at http://localhost:8080
-```
-
-Uses Python 3.11.9 via pyenv (avoids `pkgutil.find_loader` error in Python 3.14). Label Studio has its own separate venv at `~/.venvs/label-studio` (install: `~/.pyenv/versions/3.11.9/bin/python -m venv ~/.venvs/label-studio && source ~/.venvs/label-studio/bin/activate && pip install label-studio`).
-
-## Setup
-
-Create and activate the project virtualenv using Python 3.11.9 via pyenv:
-
-```bash
-~/.pyenv/versions/3.11.9/bin/python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
 
 ## Architecture Notes
 
