@@ -60,6 +60,33 @@ label-studio start
 # UI at http://localhost:8080
 ```
 
+For the ML backend to resolve local image paths, Label Studio must be started with:
+
+```bash
+LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true label-studio start
+```
+
+## ML Backend (YOLO pre-annotation)
+
+Serves the trained YOLO model to Label Studio for automatic pre-annotation of new frames.
+
+```bash
+source venv/bin/activate
+label-studio-ml start ml_backend/ --port 9090
+# Connect at http://localhost:9090 via Label Studio > Settings > Machine Learning
+```
+
+To use a different model checkpoint, set the `YOLO_MODEL_PATH` env var:
+
+```bash
+YOLO_MODEL_PATH=outputs/detection/train/weights/best.pt label-studio-ml start ml_backend/ --port 9090
+```
+
+Default model path: `outputs/detection/train/weights/best.pt`
+
+**Label Studio labeling config must have `RectangleLabels` with these exact value strings:**
+`attached-energy`, `attached-item`, `card`, `multicard`
+
 ## Running the Pipeline
 
 ```bash

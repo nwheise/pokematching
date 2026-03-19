@@ -4,6 +4,7 @@ requests
 tqdm
 numpy<2.0.0
 label-studio
+label-studio-ml
 timm
 torch
 torchvision

@@ -50,6 +50,7 @@ matching/              # Card identification approaches
   orb/                 # ORB feature matching
   embedding/           # DINOv2/MobileNetV4 embedding matching
   card_catalog.py      # Shared catalog builder + reference image downloader
+ml_backend/            # Label Studio ML backend for YOLO pre-annotation
 utils/                 # Shared constants and utilities
 
 data/                  # Input data (gitignored)
@@ -79,9 +80,11 @@ pip install -r requirements.txt
 
 ```bash
 source venv/bin/activate
-label-studio start
+LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true label-studio start
 # UI at http://localhost:8080
 ```
+
+> `LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true` is required for the ML backend to resolve local image paths.
 
 Annotate video frames with bounding boxes and export in YOLO format. Place the exported files in:
 
@@ -95,6 +98,18 @@ Classes:
 - `1`: `attached-item`
 - `2`: `card`
 - `3`: `multicard`
+
+#### ML Backend (YOLO pre-annotation)
+
+To speed up labeling, connect the trained YOLO model to Label Studio as a pre-annotation backend:
+
+```bash
+source venv/bin/activate
+label-studio-ml start ml_backend/ --port 9090
+# Connect at http://localhost:9090 via Label Studio > Settings > Machine Learning
+```
+
+To use a specific model checkpoint, set `YOLO_MODEL_PATH` (default: `outputs/detection/train/weights/best.pt`).
 
 ### 2. Extraction
 
