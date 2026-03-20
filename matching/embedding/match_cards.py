@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """
-Embedding-based Pokemon TCG card identification — proof of concept.
+Embedding-based Pokemon TCG card identification.
 
-Reference index: data/card_images/       (one image per card, from match_cards.py)
+Reference index: data/card_images/       (one image per card)
 Query images:    data/images/ + data/labels/  (YOLO-labelled video frames)
 
 Output: outputs/match_results/{model}/  — original frames annotated with bounding boxes and top-1 match labels
 
 Run:
-    python matching/embedding/evaluate.py
+    python matching/embedding/match_cards.py
+    python matching/embedding/match_cards.py --deck_file data/deck.txt
 """
 
+import argparse
+import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -51,6 +55,69 @@ def catalog_by_id(catalog: list[dict]) -> dict[str, dict]:
         c["id"]: {"name": c["name"], "supertype": c["supertype"], "subtypes": c["subtypes"]}
         for c in catalog
     }
+
+
+# ---------------------------------------------------------------------------
+# Deck file parsing
+# ---------------------------------------------------------------------------
+
+HEADER_RE = re.compile(r'^(Pok[eé]mon|Trainer|Energy):\s*\d+', re.IGNORECASE)
+TOTAL_RE  = re.compile(r'^Total Cards:\s*\d+', re.IGNORECASE)
+CARD_RE   = re.compile(r'^(\d+)\s+(.+?)\s+([A-Z0-9-]+)\s+(\d+)\s*$')
+
+
+def parse_deck_file(deck_path: Path) -> set[str]:
+    """
+    Parse a PTCGL-format deck list and return a set of resolved card IDs.
+
+    Expected format per card line:
+        <count> <name> <SET_CODE> <number>
+    e.g.:
+        3 Dunsparce TEF 128
+    """
+    sets_path = Path("pokemon-tcg-data/sets/en.json")
+    if not sets_path.exists():
+        raise SystemExit(f"Error: sets file not found: {sets_path}")
+
+    with open(sets_path) as f:
+        sets_data = json.load(f)
+
+    ptcgo_to_id: dict[str, str] = {}
+    for s in sets_data:
+        code = s.get("ptcgoCode", "")
+        if code:
+            ptcgo_to_id[code.upper()] = s["id"]
+
+    card_ids: set[str] = set()
+    unresolved_codes: set[str] = set()
+    parse_failures = 0
+
+    with open(deck_path) as f:
+        for line in f:
+            line = line.rstrip()
+            if not line or HEADER_RE.match(line) or TOTAL_RE.match(line):
+                continue
+            m = CARD_RE.match(line)
+            if not m:
+                print(f"  WARNING: could not parse deck line: {line!r}")
+                parse_failures += 1
+                continue
+            count, _name, set_code, number = m.groups()
+            if int(count) <= 0:
+                continue
+            set_id = ptcgo_to_id.get(set_code.upper())
+            if set_id is None:
+                unresolved_codes.add(set_code)
+                continue
+            card_ids.add(f"{set_id}-{number}")
+
+    for code in sorted(unresolved_codes):
+        print(f"  WARNING: set code not found in pokemon-tcg-data: {code!r}")
+    if parse_failures:
+        print(f"  WARNING: {parse_failures} line(s) could not be parsed")
+
+    print(f"  Deck loaded: {len(card_ids)} unique cards from {deck_path}")
+    return card_ids
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +340,14 @@ def draw_results(frame_path: Path, detections: list[dict], catalog: dict[str, di
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Match card crops to Pokemon TCG cards using embeddings.")
+    parser.add_argument(
+        "--deck_file",
+        metavar="PATH",
+        help="Path to a PTCGL-format deck list .txt file. When provided, matching is restricted to only cards in this deck.",
+    )
+    args = parser.parse_args()
+
     for d in (CARD_IMAGES_DIR, FRAMES_DIR, LABELS_DIR):
         if not d.is_dir():
             raise SystemExit(f"Error: directory not found: {d}")
@@ -314,6 +389,18 @@ def main() -> None:
     if n_tool == 0:
         print("  WARNING: no Pokémon Tool cards found in index — class 1 will fall back to full search")
 
+    deck_mask = None
+    if args.deck_file:
+        print(f"\nLoading deck from {args.deck_file}...")
+        deck_card_ids = parse_deck_file(Path(args.deck_file))
+        deck_mask = np.array([cid in deck_card_ids for cid in card_ids], dtype=bool)
+        n_found = int(deck_mask.sum())
+        n_missing = len(deck_card_ids) - n_found
+        print(f"  Deck mask: {n_found}/{len(deck_card_ids)} deck cards found in index")
+        if n_missing > 0:
+            missing = deck_card_ids - set(card_ids)
+            print(f"  WARNING: {n_missing} deck card(s) not in reference index: {missing}")
+
     print("\n[Phase 2] Matching crops...")
     inf_ms = []
 
@@ -325,7 +412,11 @@ def main() -> None:
         for det in detections:
             emb, ms = model.embed_single(det["crop"])
             inf_ms.append(ms)
-            valid_mask = class_masks.get(det["cls"])
+            class_mask = class_masks.get(det["cls"])
+            if deck_mask is not None:
+                valid_mask = deck_mask & class_mask if class_mask is not None else deck_mask
+            else:
+                valid_mask = class_mask
             det["top"] = match_crop(emb, ref_embs, card_ids, valid_mask=valid_mask)
 
         out_path = output_dir / f"{frame_stem}_annotated.png"

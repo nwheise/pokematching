@@ -104,11 +104,14 @@ python detection/train.py
 # Step 3c: Run detector on new frames
 python detection/detect.py
 
-# Step 4: Match crops to Pokemon TCG cards (ORB approach)
-python matching/orb/match_cards.py
+# Step 4: Match crops to Pokemon TCG cards (embedding approach)
+python matching/embedding/match_cards.py
 
-# Step 4 alt: Match using embeddings
-python matching/embedding/evaluate.py
+# Step 4 with deck restriction
+python matching/embedding/match_cards.py --deck_file data/deck.txt
+
+# Step 4 alt: ORB feature matching (archived)
+python matching/orb/match_cards_orb.py
 ```
 
 
@@ -122,9 +125,11 @@ python matching/embedding/evaluate.py
 
 **`matching/card_catalog.py`** — shared module for building the card catalog from `pokemon-tcg-data/` JSON and downloading reference card images to `data/card_images/` (rate-limited to ≤10 req/s). Used by both matching approaches.
 
-**`matching/orb/match_cards.py`** — ORB feature matching: builds descriptor index (cached in `outputs/match_results/card_descriptors.npz`), then matches crops via BFMatcher with Lowe's ratio test (0.75) in 200k-row chunks, returning top-5 by inlier count.
+**`matching/embedding/match_cards.py`** — primary matching script. Uses MobileNetV4 (or DINOv2) embeddings with cosine similarity against the reference index. Accepts `--deck_file PATH` to restrict matching to cards in a PTCGL-format deck list. Class-based filtering masks apply to energy/tool detections; deck mask layers on top when `--deck_file` is provided.
 
-**`matching/embedding/evaluate.py`** — proof-of-concept using DINOv2 or MobileNetV4 embeddings with cosine similarity matching and class-based filtering masks.
+**PTCGL deck file format** (`--deck_file`): plain-text file with header lines (`Pokémon: N`, `Trainer: N`, `Energy: N`, `Total Cards: N`) and card lines of the form `<count> <name> <SET_CODE> <number>` (e.g. `3 Dunsparce TEF 128`). Set codes are resolved via `ptcgoCode` in `pokemon-tcg-data/sets/en.json`. A sample deck is at `data/deck.txt`.
+
+**`matching/orb/match_cards_orb.py`** — archived ORB feature matching approach. Builds descriptor index (cached in `outputs/match_results/card_descriptors.npz`), matches crops via BFMatcher with Lowe's ratio test (0.75) in 200k-row chunks, returning top-5 by inlier count.
 
 **`detection/`** — uses ultralytics YOLOv8. `prepare_dataset.py` splits data into train/val. `train.py` and `detect.py` are minimal wrappers around the ultralytics API.
 

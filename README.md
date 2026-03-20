@@ -46,9 +46,11 @@ git submodule update --init
 ```
 extraction/            # Crop YOLO-labeled regions from frames
 detection/             # YOLO model training, inference, dataset prep
-matching/              # Card identification approaches
-  orb/                 # ORB feature matching
+matching/              # Card identification modules
   embedding/           # DINOv2/MobileNetV4 embedding matching
+    match_cards.py
+  orb/                 # ORB feature matching
+    match_cards_orb.py
   card_catalog.py      # Shared catalog builder + reference image downloader
 ml_backend/            # Label Studio ML backend for YOLO pre-annotation
 utils/                 # Shared constants and utilities
@@ -136,13 +138,18 @@ python detection/detect.py             # run model on new frames
 Match detected card crops against the Pokemon TCG reference catalog to identify card names.
 
 ```bash
-# ORB feature matching
-python matching/orb/match_cards.py
+# Embedding-based matching (MobileNetV4, full reference catalog)
+python matching/embedding/match_cards.py
 
-# Embedding-based matching (experimental: DINOv2 or MobileNetV4)
-python matching/embedding/evaluate.py
+# Restrict matching to cards in a PTCGL deck list
+python matching/embedding/match_cards.py --deck_file data/deck.txt
+
+# ORB feature matching (archived)
+python matching/orb/match_cards_orb.py
 
 # Output: outputs/match_results/
 ```
+
+`--deck_file` accepts a PTCGL-format deck list. Card lines follow `<count> <name> <SET_CODE> <number>` (e.g. `3 Dunsparce TEF 128`). A sample deck is at `data/deck.txt`.
 
 The first run will download reference card images to `data/card_images/` (rate-limited to ≤10 req/s).
