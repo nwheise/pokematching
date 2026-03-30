@@ -52,6 +52,11 @@ matching/              # Card identification modules
   orb/                 # ORB feature matching
     match_cards_orb.py
   card_catalog.py      # Shared catalog builder + reference image downloader
+export/                # ONNX export scripts and release tooling
+  export_yolo.py             # Export YOLOv11n → ONNX + JSON sidecar
+  export_mobilenetv4.py      # Export MobileNetV4 → ONNX + JSON sidecar
+  export_reference_embeddings.py  # Export reference embedding catalog
+  create_release.sh          # Create a GitHub Release for one or all components
 ml_backend/            # Label Studio ML backend for YOLO pre-annotation
 utils/                 # Shared constants and utilities
 
@@ -65,6 +70,7 @@ outputs/               # All pipeline outputs (gitignored)
   detection/           # YOLO training runs, weights, predictions
   match_results/       # Match outputs, ORB descriptor cache
   embeddings/          # Cached embedding .npz files
+  export/              # ONNX models, sidecars, and embeddings ready for release
 
 pokemon-tcg-data/      # Submodule: card/set JSON from PokemonTCG/pokemon-tcg-data
 ```
@@ -153,3 +159,29 @@ python matching/orb/match_cards_orb.py
 `--deck_file` accepts a PTCGL-format deck list. Card lines follow `<count> <name> <SET_CODE> <number>` (e.g. `3 Dunsparce TEF 128`). A sample deck is at `data/deck.txt`.
 
 The first run will download reference card images to `data/card_images/` (rate-limited to ≤10 req/s).
+
+### 5. ONNX Export & Release
+
+Export the trained models to ONNX for use in the Electron app, and publish them as GitHub Release assets.
+
+```bash
+# Export a single component
+python export/export_yolo.py
+python export/export_mobilenetv4.py
+python export/export_reference_embeddings.py
+# Output: outputs/export/
+
+# Create a GitHub Release (requires clean working tree and gh auth login)
+./export/create_release.sh yolo          # after retraining YOLO
+./export/create_release.sh embeddings    # after card catalog updates
+./export/create_release.sh mobilenetv4   # after changing embedding model
+./export/create_release.sh all           # release all three components
+```
+
+Each component is released independently under a tag derived from the current commit hash (e.g. `yolo-abc1234`), so updating one model doesn't require re-releasing the others. Release assets:
+
+| Component | Assets |
+|-----------|--------|
+| `yolo` | `yolo.onnx`, `yolo.json` |
+| `mobilenetv4` | `mobilenetv4.onnx`, `mobilenetv4.json` |
+| `embeddings` | `reference_embeddings.npz`, `reference_embeddings_meta.json` |

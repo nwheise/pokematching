@@ -25,6 +25,11 @@ matching/              # Card identification approaches
   card_catalog.py      # Shared catalog building and reference image downloading
   orb/                 # ORB feature matching
   embedding/           # DINOv2/MobileNetV4 embedding matching
+export/                # ONNX export scripts and release tooling
+  export_yolo.py             # Export YOLOv11n → ONNX + JSON sidecar
+  export_mobilenetv4.py      # Export MobileNetV4 → ONNX + JSON sidecar
+  export_reference_embeddings.py  # Export reference embedding catalog
+  create_release.sh          # Create a GitHub Release for one or all components
 utils/                 # Shared constants and utilities
   common.py            # CLASSES, parse_yolo_labels, mask_overlapping_regions
 
@@ -38,6 +43,7 @@ outputs/               # All pipeline outputs (gitignored)
   detection/           # Training runs, weights, predictions
   match_results/       # Match outputs, ORB descriptor cache
   embeddings/          # Cached embedding .npz files
+  export/              # ONNX models, sidecars, and embeddings ready for release
 
 pokemon-tcg-data/      # Git submodule: card/set JSON data
 ```
@@ -112,6 +118,10 @@ python matching/embedding/match_cards.py --deck_file data/deck.txt
 
 # Step 4 alt: ORB feature matching (archived)
 python matching/orb/match_cards_orb.py
+
+# Step 5: Export models to ONNX and publish a GitHub Release
+./export/create_release.sh all       # release all components
+./export/create_release.sh yolo      # release only YOLO (e.g. after retraining)
 ```
 
 
@@ -128,6 +138,8 @@ python matching/orb/match_cards_orb.py
 **`matching/embedding/match_cards.py`** — primary matching script. Uses MobileNetV4 (or DINOv2) embeddings with cosine similarity against the reference index. Accepts `--deck_file PATH` to restrict matching to cards in a PTCGL-format deck list. Class-based filtering masks apply to energy/tool detections; deck mask layers on top when `--deck_file` is provided.
 
 **PTCGL deck file format** (`--deck_file`): plain-text file with header lines (`Pokémon: N`, `Trainer: N`, `Energy: N`, `Total Cards: N`) and card lines of the form `<count> <name> <SET_CODE> <number>` (e.g. `3 Dunsparce TEF 128`). Set codes are resolved via `ptcgoCode` in `pokemon-tcg-data/sets/en.json`. A sample deck is at `data/deck.txt`.
+
+**`export/`** — ONNX export scripts and release tooling. Each script emits an ONNX model file and a JSON sidecar describing preprocessing parameters (input size, mean/std, crop_pct for MobileNetV4; class names and nms_baked for YOLO). `export_mobilenetv4.py` runs a PyTorch/ONNX parity check (asserts max diff < 1e-4). `create_release.sh` reads the current git commit hash to tag releases; aborts if the working tree is dirty. Components (`yolo`, `mobilenetv4`, `embeddings`) are released independently so retraining one model doesn't require re-releasing the others.
 
 **`matching/orb/match_cards_orb.py`** — archived ORB feature matching approach. Builds descriptor index (cached in `outputs/match_results/card_descriptors.npz`), matches crops via BFMatcher with Lowe's ratio test (0.75) in 200k-row chunks, returning top-5 by inlier count.
 
