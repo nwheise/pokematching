@@ -9,3 +9,6 @@ timm
 torch
 torchvision
 ultralytics
+onnx
+onnxruntime
+onnxslim
