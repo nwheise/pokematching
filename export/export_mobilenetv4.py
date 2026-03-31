@@ -48,12 +48,10 @@ def main():
     cfg = resolve_data_config(model.pretrained_cfg)
     input_size = cfg["input_size"]  # (3, H, W)
     h, w = input_size[1], input_size[2]
-    crop_pct = float(cfg.get("crop_pct", 0.875))
-    scale_size = int(round(min(h, w) / crop_pct))
     mean = list(cfg["mean"])
     std = list(cfg["std"])
 
-    print(f"  input_size={h}x{w}, scale_size={scale_size}, crop_pct={crop_pct}")
+    print(f"  input_size={h}x{w}, resize_width={w}, crop_mode=top")
     print(f"  mean={mean}, std={std}")
 
     dummy_input = torch.zeros(1, 3, h, w)
@@ -89,8 +87,8 @@ def main():
     sidecar = {
         "model_id": args.model_id,
         "input_size": [h, w],
-        "scale_size": scale_size,
-        "crop_pct": crop_pct,
+        "resize_width": w,
+        "crop_mode": "top",
         "mean": mean,
         "std": std,
         "embedding_dim": embedding_dim,

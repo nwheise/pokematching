@@ -146,14 +146,19 @@ def _make_transform(model):
     cfg = resolve_data_config(model.pretrained_cfg)
     input_size = cfg["input_size"]
     h, w = input_size[1], input_size[2]
-    crop_pct = cfg.get("crop_pct", 0.875)
-    scale_size = int(round(min(h, w) / crop_pct))
     mean = torch.tensor(list(cfg["mean"]), dtype=torch.float32).view(3, 1, 1)
     std  = torch.tensor(list(cfg["std"]),  dtype=torch.float32).view(3, 1, 1)
 
     def transform(img: Image.Image) -> torch.Tensor:
-        img = TF.resize(img, scale_size)
-        img = TF.center_crop(img, (h, w))
+        orig_w, orig_h = img.size
+        new_h = max(1, int(round(orig_h * w / orig_w)))
+        img = TF.resize(img, [new_h, w])
+        if img.height >= h:
+            img = img.crop((0, 0, w, h))
+        else:
+            padded = Image.new("RGB", (w, h), (0, 0, 0))
+            padded.paste(img, (0, 0))
+            img = padded
         arr = np.array(img.convert("RGB"), dtype=np.uint8)
         tensor = torch.tensor(arr, dtype=torch.float32).permute(2, 0, 1) / 255.0
         return (tensor - mean) / std
